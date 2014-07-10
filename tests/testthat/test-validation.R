@@ -136,3 +136,5 @@ test_that("NA warn stop switch handles NA values", {
   expect_equal(icd9ValidNaWarnStopShort(NA_character_, invalidAction = "silent"), NA_character_)
   expect_equal(warnNa, NA_character_)
 })
+
+# test no NA in valid mappings, no duplicate names
