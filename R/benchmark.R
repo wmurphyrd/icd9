@@ -35,22 +35,9 @@ icd9Benchmark <- function() {
 
 }
 
-randomPatients <- function(n = 50000, np = 20) {
-  pts <- round(n/np)
-  data.frame(
-    visitId = sample(seq(1, pts), replace = TRUE, size = n),
-    icd9 = randomShortIcd9(n),
-    poa = as.factor(
-      sample(x = c("Y","N", "n", "n", "y", "X","E","",NA), replace = T, size = n))
-  )
+benchmarkComorbid <- function() {
+  require('microbenchmark')
+  patientData <- randomPatients(n = 1e3, np = 5)
+  microbenchmark(icd9Comorbidities(icd9df = patientData, icd9Mapping = ahrqComorbid), times = 10)
+  microbenchmark(icd9ComorbiditiesLongCpp(patientData$visitId, patientData$icd9, icd9Mapping = ahrqComorbid), times = 10)
 }
-
-randomShortIcd9 <- function(n = 50000)
-  as.character(floor(runif(min=1, max=99999, n=n))) # tolerate <3 digits?
-
-randomDecimalIcd9 <- function(n = 50000)
-  paste(
-    round(runif(min = 1, max = 999, n = n)),
-    sample(icd9ExpandMinor(), replace = T, size = n),
-    sep = "."
-  )

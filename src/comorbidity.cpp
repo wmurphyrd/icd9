@@ -1,0 +1,212 @@
+// #include <unordered_set> // [[Rcpp::plugins(cpp11)]]
+#include <Rcpp.h>
+using namespace Rcpp;
+
+typedef std::set<std::string> Icd9Set; // set of icd9 codes for comorbidities map
+typedef std::map<std::string, Icd9Set> CbdMapType; // comorbidity name to set of icd9 codes mapping
+typedef CbdMapType::iterator CbdMapTypeIt;
+typedef std::multimap<std::string, std::string> ViMapType; // visit:icd9 mapping - we have duplicate keys (visitids) // better as unordered multimap?
+typedef ViMapType::iterator ViMapTypeIt;
+typedef std::pair<ViMapType::iterator, ViMapType::iterator> ViPairItType;
+typedef std::vector<std::string> StrVec;
+
+//' @name cvToVs
+//' @title convert CharacterVector to C++ vector of strings
+//' @param cv vector of character strings
+//' @return c++ vector of strings
+//' @export
+//' @import Rcpp
+// [[Rcpp::export]]
+std::vector<std::string> cvToVs(Rcpp::CharacterVector cv) {
+  std::vector<std::string> s(cv.size());
+  for (int i=0; i<cv.size(); i++) {
+    s[i] = std::string(cv[i]);
+  }
+  return(s);
+}
+
+// convert a mapping list to a map of 'sets'. Will enable fast look-up of an
+// icd-9 code in each section of a mapping
+//' @name icd9MappingToVectorSetsCpp
+//' @title icd9MappingToVectorSetsCpp
+//' @description purpose is to index each comorbidity so we can quickly tell
+//' whether a given ICD-9 code is in that set.
+//' @param icd9Mapping
+//' @return C++ vector of sets of characters
+//' @export
+//' @import Rcpp
+// [[Rcpp::export]]
+std::map<std::string, std::set<std::string> > icd9MappingToVectorSetsCpp(List icd9Mapping) {
+
+  CbdMapType cm;
+  int maplen = icd9Mapping.size();
+
+  StringVector svMapNames = icd9Mapping.attr("names");
+  std::vector<std::string> tmp = as<std::vector<std::string> >(svMapNames);
+  //std::cout << tmp[0]; // works!
+
+
+  for (std::vector<std::string>::iterator it = tmp.begin(); it != tmp.end(); ++it) {
+    // std::cout << *it << "\n"; // it works
+    // get list for current comorbidity name
+
+    std::vector<std::string> icd9s;
+    icd9s = as<std::vector<std::string> >(icd9Mapping[*it]);
+    // put each icd9 into the set:
+    //std::vector<std::string>::iterator icd9s.begin();
+    cm[*it].insert(icd9s.begin(), icd9s.end());
+  }
+
+
+  //for (CbdMapType::iterator it = cm.begin(); it != cm.end(); ++it) {  // test mapping - we are now alphabetically sorted.
+  //std::cout << it->first << "\n";
+  //Icd9Set i = it->second;
+  //std::cout << i.size() << "\n";
+  //}
+
+  return(cm);
+}
+
+//' @name icd9ComorbiditiesRaggedCpp
+//' @title allocate co-morbidities based on list of vectors of ICD-9 codes
+//' @param vipCodes list named by an Id (e.g. visit or patient), each with a character vector of short-form ICD-9 codes
+//' @param icd9Mapping list named by  co-morbidity, with each item containing a character vector of ICD-9 codes for that co-morbidity
+//' @return matrix of comorbidities, with row names being the visit or patients identifiers, column names being the comorbidities, and binary values.
+//' @export
+//' @import Rcpp
+// [[Rcpp::export]]
+LogicalMatrix icd9ComorbiditiesRaggedCpp(CharacterVector vipCodes, CharacterVector icd9Short, List icd9Mapping) {
+  CharacterVector comorbids = icd9Mapping.names();
+  int nComorbids = comorbids.size();
+  int nVipCodes = vipCodes.size();
+
+  // todo setup hash map for each comorbidity then search may be quicker
+
+  // initialize to zeroes
+  LogicalMatrix out(nVipCodes, nComorbids);
+
+  // loop through visits (i.e. row of output matrix)
+  for (int v = 0; v < nVipCodes; v++) {
+    SEXP li = vipCodes[v];
+    Rcpp::CharacterVector icd9Codes(li);
+    int nCodes = icd9Codes.size();
+    // loop through each co-morbidity (i.e. column of output matrix)
+    for (int c = 0; c < nComorbids; c++) {
+      // now for each co-morbidity, e.g. HTN, check whether we have a match. No
+      // need to continue checking once we have a single match. Could do this
+      // with sugar 'match' but our lists are quite short, and I don't want all
+      // the matches, just the first.
+      CharacterVector comorbidSet = icd9Mapping[c];
+      int nComorbidSet = comorbidSet.length();
+      for (int d = 0; d < nComorbidSet; d++) {
+        std::string comorbidToCheck = Rcpp::as<std::string>(comorbidSet[d]);
+        // loop through icd-9 codes for current visit
+        for (int i = 0; i < nCodes; i++) {
+          std::string icd9CodeToCheck = Rcpp::as<std::string>(icd9Codes[i]);
+          if (comorbidToCheck == icd9CodeToCheck) {
+            out(v, c) = 1;
+            //std::cout << "found a co-morbidity\n";
+            goto doneThisComorbidity; // we have +ve so no need to look further
+          }
+        } // end loop through visit codes
+      } // end loop through a comorbidity definition
+      doneThisComorbidity: {}
+    } // end loop through all comorbidities
+  } // end loop through visits/patients
+
+  // set the row and column names:
+  Rcpp::List rcnames = Rcpp::List::create(vipCodes, comorbids);
+  out.attr("dimnames") = rcnames;
+  return(out);
+}
+
+//' @name icd9ComorbiditiesLongCpp
+//' @title allocate co-morbidities based on vectors of IDs and ICD-9 codes
+//' @param visitId character vector of visit or patient identifiers
+//' @template icd9-short
+//' @param icd9Mapping list named by  co-morbidity, with each item containing a character vector of ICD-9 codes for that co-morbidity
+//' @return matrix of comorbidities, with row names being the visit or patients identifiers, column names being the comorbidities, and binary values.
+//' @examples
+//'  icd9ComorbiditiesLongCpp(c("pat1","pa2","three"), c("042","4011", "44179"), ahrqComorbid)
+//' @export
+//' @import Rcpp
+// [[Rcpp::export]]
+LogicalMatrix icd9ComorbiditiesLongCpp(CharacterVector visitId, CharacterVector icd9Short, List icd9Mapping) {
+
+  // convert my list of character vectors to a map of sets of strings, pure std/c++
+  CbdMapType cMap;
+  ViMapType viMap;
+
+  int nVisitId = visitId.size();
+  CharacterVector uniqueVisitId = unique(visitId); // can probably avoid this now i have a mapping
+  int nUniqueVisitId = uniqueVisitId.size();
+  int nMappingComorbids = icd9Mapping.size();
+
+  // get C++ types for the input data: surely better way to do this.
+  std::vector<std::string> cppVisitId = cvToVs(visitId);
+  std::vector<std::string> cppIcd9Short = cvToVs(icd9Short);
+  std::vector<std::string> cppUniqueVisitId =  cvToVs(uniqueVisitId);
+
+  cMap = icd9MappingToVectorSetsCpp(icd9Mapping);
+  // turns out to be difficult to initialize maps from two vectors without boost or C++11:
+  // TODO: consider using unordered_map C++11 , but also available in std/tr1
+  //std::unordered_map<Rcpp::CharacterVector> visitIdSet ( visitId );
+  // this loop is probably expensive in time.
+  for (int ivi=0; ivi<nVisitId; ivi++) {
+    viMap.insert(std::pair<std::string, std::string>(cppVisitId[ivi], cppIcd9Short[ivi]));
+  }
+  // now we have a map to lookup icd9 codes for each unique visit Id. Pretty
+  // sure this is not efficient. Keeping count of my own row number when
+  // inserting into the matrix seems cowboy, so for now, I'll iterate over
+  // unique visit ids, then search for all icd-9 codes in the 'vi' map.
+
+  // straight to Rcpp matrix as our output. possible advantage in using native matrix first.
+  LogicalMatrix out(nUniqueVisitId, nMappingComorbids); // rows,cols filled with zero
+  //std::cout << "rows: " << out.nrow() << ", ";
+  //std::cout << "cols: " << out.ncol() << "\n";
+  // name the rows and cols up front, so we can reference the cols by name. This may be much slower...
+  std::vector<std::string> cbdNames;
+  for(CbdMapType::iterator it = cMap.begin(); it != cMap.end(); ++it) {
+    cbdNames.push_back(it->first);
+  }
+
+  Rcpp::List rcnames = Rcpp::List::create(uniqueVisitId, cbdNames);
+  out.attr("dimnames") = rcnames;
+
+  std::string icd9CodeToCheck;
+
+  // iterate through unique ids // should be able to avoid needing unique()
+  for (StrVec::iterator vit=cppUniqueVisitId.begin(); vit!=cppUniqueVisitId.end(); ++vit) {
+    //std::cout << "icd code to check: " << icd9CodeToCheck << "\n";
+    // now we can use the map structure to find the comorbidities, but not an iterator, since we need to make a matrix index... can't see a way to string index the matrix
+    //for (CbdMapType::iterator it = cm.begin(); it != cm.end(); ++it) {
+
+    // vit points to a unique visit id: now use 'cm' map to get list of icd-9 codes for that visit and loop through results:
+    // *vit should be the (unique) visitId
+
+    ViPairItType viPair = viMap.equal_range(*vit); // get pair of iterators that bracket the results (if any)
+
+    // we then iterate through the range, with each iterator providing a multimap type
+    for (ViMapTypeIt iit=viPair.first; iit!=viPair.second; ++iit) {
+      std::string icd9CodeToCheck = iit->second;
+
+      // have a single icd9 code for a single visit, now look it up in the comorbidities:
+      //for (int cit = 0; cit < nMappingComorbids; cit++) { // use iterator and distance instead of numbers
+      for (CbdMapTypeIt cit = cMap.begin(); cit!=cMap.end(); ++cit) {
+
+        Icd9Set iSet = cit->second;
+        if (iSet.find(icd9CodeToCheck) != iSet.end()) { // lookup the icd9 code in the icd9 'set' for current co-morbidity
+        //std::cout << *vit << "\n";
+        int vIndex = std::distance(cppUniqueVisitId.begin(), vit);
+        int cIndex = std::distance(cMap.begin(), cit);
+        //std::cout << "v index = " << vIndex << "\n";
+        //std::cout << "c index = " << cIndex << "\n";
+        //std::cout << icd9CodeToCheck << "\n";
+        out(vIndex, cIndex) = 1; // row x col
+        } // end if matched
+      } // end loop through mapping
+    } // end loop through icd9 codes for a single visit
+  } // end loop through visits
+  return(out);
+}
+

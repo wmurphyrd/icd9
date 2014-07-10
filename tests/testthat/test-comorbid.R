@@ -1,28 +1,109 @@
-context("comorbidities, generally slow tests")
+context("comorbidities, slow tests")
 
+#randomSampleAhrq <- sample(unname(c(ahrqComorbid, recursive = TRUE)), replace = TRUE, size = n)
+testSimplePatients <- data.frame(
+  visitId = as.character(c(1000, 1000, 1000, 1001, 1001, 1002)),
+  icd9 = c("27801", "7208", "25001", "34400", "4011", "4011"),
+  poa = factor(c("Y", "N", "Y", "N", "Y", "N")),
+  stringsAsFactors = FALSE
+)
+
+n = 100
+np = 2
 set.seed(1441)
-n <- 500
-np <- round(n/20) # icd9 codes per patients
-
-randomShortIcd9 <- as.character(floor(runif(min = 10000, max = 99999, n = n)))
-randomSampleAhrq <- sample(unname(c(ahrqComorbid, recursive = TRUE)), replace = TRUE, size = n)
-fewIcd9 <- c("27801", "7208", "25001", "34400", "4011", "4011")
-
-patientData <- data.frame(
-  visitId = c(1000, 1000, 1000, 1001, 1001, 1002),
-  icd9 = fewIcd9,
-  poa = factor(c("Y", "N", "Y", "N", "Y", "N"))
+testRandomPatients <- data.frame(
+  visitId = as.character(sample(seq(1, np), replace = TRUE, size = n)),
+  #icd9 = as.character(floor(runif(min = 1000, max = 99999, n = n))),
+  icd9 = as.character(sample(unname(unlist(ahrqComorbid)), size = n)),
+  poa = as.factor(sample(x=c("Y", "N", "n", "n", "y", "X", "E", "", NA), replace = TRUE, size = n)),
+  stringsAsFactors = FALSE
 )
 
-randomPatients <- data.frame(
-  visitId = sample(seq(1, np), replace = TRUE, size=n),
-  icd9 = randomShortIcd9,
-  poa = as.factor(sample(x=c("Y", "N", "n", "n", "y", "X", "E", "", NA), replace = TRUE, size=n))
+# not real data, but designed to be similar
+testRealPatients <- structure(
+  list(visitId = as.character(c(207210584L, 207210584L, 207210584L,
+                                207210584L, 207210584L, 207210600L, 207210600L,
+                                207210600L, 207210600L, 207210600L, 207210600L,
+                                207210600L, 207210600L, 207210600L, 207210600L,
+                                207210600L, 207210600L, 207210600L, 207210618L, 207210618L)),
+       icd9 = c("19907", "V4346", "26189", "19318", "20149", "30434", "14291",
+                "28012", "24940", "3431", "20971", "20040", "24948", "28063",
+                "16876", "30048", "16502", "1797", "16016", "20914"),
+       poa = c("N", "N", "N", "Y", "Y", "Y", "Y", "Y", "Y", "Y",
+               "Y", "Y", "Y", "Y", "E", "E", "Y", "Y", "Y", "N")),
+  .Names = c("visitId", "icd9", "poa"),
+  class = "data.frame"
 )
 
-# random patients with icd9 codes selected from ahrq data
-randomPatientsAhrqIcd9 <- randomPatients
-randomPatientsAhrqIcd9[["icd9"]] <- randomSampleAhrq
+#TODO: tests for these:
+#testMultiDzOnePat
+#testMultiDzMultiPats
+#testEmptyInvalidPats
+
+#testRagged
+
+
+# test that the C++ version always give the same results as the R version:
+# doesn't mean they're right, of course.
+for (p in c("testSimplePatients", "testRandomPatients", "testRealPatients")) {
+  pts <- get(p)
+  test_that(paste("R and C++ gives same result with ", p), {
+    expect_identical(
+      icd9Comorbidities(visitId = pts$visitId, icd9 = pts$icd9, icd9Mapping = ahrqComorbid, doWithCpp = TRUE),
+      icd9Comorbidities(visitId = pts$visitId, icd9 = pts$icd9, icd9Mapping = ahrqComorbid, doWithCpp = FALSE),
+      info = p)
+  })
+}
+
+# test the c++ and R versions against each other
+test_that(paste("icd9 comorbidities extra id/code to mismatch length"), {
+  expect_error(icd9Comorbidities(pts$visitId, c(pts$icd9, "12345"), ahrqComorbid, doWithCpp = TRUE))
+  expect_error(icd9Comorbidities(c(pts$visitId, "123"), pts$icd9, ahrqComorbid, doWithCpp = TRUE))
+  expect_error(icd9Comorbidities(pts$visitId, c(pts$icd9, "12345"), ahrqComorbid, doWithCpp = FALSE))
+  expect_error(icd9Comorbidities(c(pts$visitId, "123"), pts$icd9, ahrqComorbid, doWithCpp = FALSE))
+})
+
+test_that(paste("mapping is not a list with"), {
+  expect_error(icd9Comorbidities(pts$visitId, pts$icd9, "ceci n'est pas un mapping", doWithCpp = FALSE))
+  expect_error(icd9Comorbidities(pts$visitId, pts$icd9, "ceci n'est pas un mapping", doWithCpp = TRUE))
+})
+
+test_that(paste("data frame not allowed anymore with"), {
+  expect_error(icd9Comorbidities(testRealPatients, ahrqComorbid, doWithCpp = FALSE))
+  expect_error(icd9Comorbidities(testRealPatients, ahrqComorbid, doWithCpp = TRUE))
+  expect_error(icd9Comorbidities(testRealPatients, testRealPatients, ahrqComorbid, doWithCpp = FALSE))
+  expect_error(icd9Comorbidities(testRealPatients, testRealPatients, ahrqComorbid, doWithCpp = TRUE))
+})
+
+test_that(paste("non-character icd9 input with"), {
+  # TODO: these get casted to charactervector silently!
+  #expect_error(icd9Comorbidities(c("1", "2", "3"), c(1,2,3))))
+  #expect_error(icd9Comorbidities(c("1", "2", "3"), c(1L,2L,3L))))
+  # todo: what to do with factors?
+})
+
+test_that(paste("icd9 comorbidities using"), {
+
+  for (pts in c(testSimplePatients, testRandomPatients, testRealPatients)) {
+    p <- get(pts)
+    for (tf in c(TRUE, FALSE)) {
+      m <- icd9Comorbidities(visitId = p$visitId, icd9 = p$icd9, icd9Mapping = ahrqComorbid, doWithCpp = tf)
+      expect_equal(colnames(m), names(ahrqComorbid), info = p)
+      expect_equal(sort(unique(asCharacterNoWarn(p$visitId))), sort(rownames(m)), info = p) # should match exactly, but no order guarantee?
+      expect_is(m, "matrix", info = p)
+      expect_equal(typeof(m), "logical", info = p)
+    } # end for T/F
+  } # end for test datasets
+})
+
+
+# ptdflogical <- logicalToBinary(ptdf)  # TODO: test elsewhere
+#expect_true(all(sapply(names(ahrqComorbid), function(x) class(ptdflogical[, x])) == "integer"))
+
+#   expect_equal(
+#     logicalToBinary(data.frame(a = c("jack", "hayley"), b = c(TRUE, FALSE), f = c(TRUE, TRUE))),
+#     data.frame(a = c("jack", "hayley"), b = c(1, 0), f = c(1, 1))
+#   )
 
 test_that("no NA values in the co-morbidity lists", {
   expect_false(any(is.na(unlist(unname(ahrqComorbid)))))
@@ -30,6 +111,11 @@ test_that("no NA values in the co-morbidity lists", {
   expect_false(any(is.na(unlist(unname(quanDeyoComorbid)))))
   expect_false(any(is.na(unlist(unname(quanElixhauserComorbid)))))
   expect_false(any(is.na(unlist(unname(elixhauserComorbid)))))
+})
+
+test_that("can convert mappings to and from short and decimal", {
+  # TODO: decaimal to short and back
+  expect_equal(icd9MappingDecimalToShort(icd9MappingShortToDecimal(ahrqComorbid)), ahrqComorbid)
 })
 
 test_that("built-in icd9 to comorbidity mappings are all valid", {
@@ -40,15 +126,20 @@ test_that("built-in icd9 to comorbidity mappings are all valid", {
 })
 
 test_that("ahrq icd9 mappings are all generated from the current generation code", {
-  expect_identical(ahrqComorbid, parseAhrqSas(condense = FALSE, save = FALSE, returnAll = FALSE)) # same but from source data. Should be absolutely identical.
-  expect_identical(ahrqComorbidAll, parseAhrqSas(condense = FALSE, save = FALSE, returnAll = TRUE)) # same but from source data. Should be absolutely identical.
+  # same but from source data. Should be absolutely identical.
+  expect_identical(ahrqComorbid, parseAhrqSas(condense = FALSE, save = FALSE, returnAll = FALSE))
+  # same but from source data. Should be absolutely identical.
+  expect_identical(ahrqComorbidAll, parseAhrqSas(condense = FALSE, save = FALSE, returnAll = TRUE))
 })
+
 test_that("quan charlson icd9 mappings are all generated from the current generation code", {
   expect_identical(quanDeyoComorbid, parseQuanDeyoSas(condense = FALSE, save = FALSE))
 })
+
 test_that("quan elixhauser icd9 mappings are all generated from the current generation code", {
   expect_identical(quanElixhauserComorbid, parseQuanElixhauser(condense = FALSE, save = FALSE))
 })
+
 test_that("elixhauser icd9 mappings are all generated from the current generation code", {
   expect_identical(elixhauserComorbid, parseElixhauser(condense = FALSE, save = FALSE))
 })
@@ -108,52 +199,5 @@ test_that("HTN subgroups all worked", {
   expect_true(all(ahrqComorbidAll$HTNCX %in% ahrqComorbid$HTNCX))
   expect_true(all(ahrqComorbidAll$CHF %in% ahrqComorbid$CHF))
   expect_true(all(ahrqComorbidAll$RENLFAIL %in% ahrqComorbid$RENLFAIL))
-
-})
-
-
-test_that("icd9 codes to comorbities", {
-
-  testdat <- structure(
-    list(visitId = c(207210584L, 207210584L, 207210584L,
-                     207210584L, 207210584L, 207210600L, 207210600L,
-                     207210600L, 207210600L, 207210600L, 207210600L,
-                     207210600L, 207210600L, 207210600L, 207210600L,
-                     207210600L, 207210600L, 207210600L, 207210618L, 207210618L),
-         icd9Code = structure(
-           c(17L, 1L, 14L, 10L, 13L, 11L, 8L, 6L,
-             18L, 2L, 7L, 19L, 3L, 5L, 20L, 16L, 12L, 4L, 15L, 9L),
-           .Label = c("04104", "1912", "2449", "2949", "29680", "4254", "4371", "4530",
-                      "5070", "59370", "5990", "71595", "74689", "7757", "85226",
-                      "V153", "77182", "45341", "78097", "V1529"), class = "factor"),
-         poa = c("N", "N", "N", "Y", "Y", "Y", "Y", "Y", "Y", "Y",
-                 "Y", "Y", "Y", "Y", "E", "E", "Y", "Y", "Y", "N")),
-    .Names = c("visitId", "icd9Code", "poa"),
-    row.names = 5000000:5000019,
-    class = "data.frame")
-
-  # TODO write the test!
-
-})
-
-test_that("icd9 comorbidities are created correctly, and logical to binary conversion ok", {
-
-  ptdf <- icd9Comorbidities(icd9df = patientData, icd9Mapping = ahrqComorbid, visitId = "visitId")
-
-  expect_equal(names(ptdf), c("visitId", names(ahrqComorbid)))
-
-  expect_true(all(sapply(names(ahrqComorbid), function(x) class(ptdf[, x])) == "logical"))
-  ptdflogical <- logicalToBinary(ptdf)
-  expect_true(all(sapply(names(ahrqComorbid), function(x) class(ptdflogical[, x])) == "integer"))
-  # do not expect all the rest of patient data to be returned - we aren't
-  # responsible for aggregating other fields by visitId!
-  expect_equal(dim(ptdf), c(length(unique(patientData[["visitId"]])), 1 + length(ahrqComorbid)))
-  expect_true(all(names(ptdf) %in% c("visitId", names(ahrqComorbid))))
-  expect_true(all(names(ptdflogical) %in% c("visitId", names(ahrqComorbid))))
-
-  expect_equal(
-    logicalToBinary(data.frame(a = c("jack", "hayley"), b = c(TRUE, FALSE), f = c(TRUE, TRUE))),
-    data.frame(a = c("jack", "hayley"), b = c(1, 0), f = c(1, 1))
-  )
 
 })

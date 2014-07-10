@@ -208,3 +208,11 @@ icd9MajMinToShort <- function(major, minor, invalidAction = icd9InvalidActions)
 #' @export
 icd9MajMinToDecimal <- function(major, minor, invalidAction = icd9InvalidActions)
   icd9PartsToDecimal(parts = icd9MajMinToParts(major, minor), invalidAction = match.arg(invalidAction))
+
+icd9MappingDecimalToShort <- function(icd9MappingDecimal) {
+  lapply(icd9MappingDecimal, icd9DecimalToShort)
+}
+
+icd9MappingShortToDecimal <- function(icd9MappingShort) {
+  lapply(icd9MappingShort, icd9ShortToDecimal)
+}

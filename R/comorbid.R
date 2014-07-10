@@ -1,11 +1,10 @@
-#' spawn reference codes into all possible lower-level codes (and memoise)
+#' spawn reference codes into all possible lower-level codes
 #'
 #' take a regular string of an ICD9 code of format (ABC.zxyz) with or without
 #' leading and trailing zeroes. top level ICD9 code and return T/F if the icd9
 #' fall within subgroups. This takes several seconds on an unimpressive desktop
 #' PC, so would benefit from memoization.
 #'
-#' @import memoise
 #' @keywords internal
 spawnReferenceChildren <-
   function(icd9Reference, isShortReference) {
@@ -17,10 +16,6 @@ spawnReferenceChildren <-
       recursive = TRUE
     )
   }
-
-# this runs outside of a function, on package load
-library(memoise)
-memSpawnRefKids <- memoise::memoise(spawnReferenceChildren)
 
 #' @title match ICD9 codes
 #' @aliases "%i9in%"
@@ -61,7 +56,7 @@ icd9InReferenceCode <- function(icd9, icd9Reference, isShort = TRUE, isShortRefe
   if (validate) stopIfInvalidIcd9(icd9, isShort = isShort)
   if (validateReference) stopIfInvalidIcd9(icd9Reference, isShort = isShortReference)
 
-  kids <- memSpawnRefKids(icd9Reference, isShortReference)
+  kids <- spawnReferenceChildren(icd9Reference, isShortReference)
 
   # convert to short form to make comparison
   if (isShort == FALSE) icd9 <- icd9DecimalToShort(icd9)
@@ -78,22 +73,24 @@ icd9InReferenceCode <- function(icd9, icd9Reference, isShort = TRUE, isShortRefe
 #' c("102", "1024","1025") %i9in% "102"
 #' c("102", "1024","1025") %i9in% c("1024", "1025")
 #' c("102", "1024","1025") %i9in% c("102", "1024", "1025")
-"%i9in%" <- function(icd9, icd9Reference)
+"%i9in%" <- function(icd9, icd9Reference) {
   icd9InReferenceCode(icd9 = icd9, icd9Reference = icd9Reference)
+}
 
 #' @title lookup pre-calculated co-morbidities for given list of visit IDs
 #' @description merges the data frame \code{dat} with pre-calculated icd9
-#'   comorbidities by \code{visitId}
-#' @param dat contains the data with at least one field named by \code{visitId},
-#'   and likely a field "poa" for the present on arrival flag. Additional fields
-#'   are preserved. Merging fields with duplicated visitId will behave according
-#'   to default of \code{mergeFun}.
+#'   comorbidities by \code{visitIdField}. I hope this will be obsolete now the
+#'   co-morbidities finding is done in C++ which is vastly quicker.
+#' @param dat contains the data with at least one field named by
+#'   \code{visitIdField}, and likely a field "poa" for the present on arrival
+#'   flag. Additional fields are preserved. Merging fields with duplicated
+#'   visitIdField will behave according to default of \code{mergeFun}.
 #' @param icd9lk is one of the pre-prepared lookup tables. e.g.
 #'   'comorbidAllInpt','comorbidPoaInpt','comorbidNotPoaInpt' If a character
 #'   string is given (vector of unit length), then the name is used to lookup
 #'   the data in current environment tree. If a data frame is given, this is
 #'   used as the data to lookup co-morbidities for the given
-#' @template visitid
+#' @template visitId
 #' @param mergeFun is the function used to merge the comorbidity data with the
 #'   visitId list, using visitId as the key. Can be left as default \code{merge}
 #'   but this has limited ability when identical fields appear, and in how field
@@ -132,68 +129,99 @@ lookupComorbidities <- function(dat,
 #' @description default comorbidity mapping is with AHRQ data. This is slow with
 #'   long lists of patients, so intended to be used as intermediate step to save
 #'   files like comorbidPoaInpt
-#' @param icd9df data.frame with fields specified by visitId and icd9Code.
-#'   icd9Code is assumed to be a non-decimal 'short' form ICD9 code. There is a
-#'   many to many ratio of icd9:visitId. This table contains multiple visitId
-#'   rows, with one row per ICD-9 code. Therefore, every ICD-9 code listed is
-#'   associated with at least one visit ID.
-#' @template visitid
-#' @template icd9field
+#' @template visitId
+#' @template icd9-any
 #' @param icd9Mapping list (or name of a list if character vector of length one
 #'   is given as argument) of the comorbidities with each top-level list item
 #'   containing a vector of decimal ICD9 codes. This is in the form of a list,
 #'   with the names of the items corresponding to the comorbidities (e.g. "HTN",
 #'   or "diabetes") and the contents of each list item being a character vector
 #'   of short-form (no decimal place but ideally zero left-padded) ICD-9 codes.
+#' @param isShortMapping logical, whether the mapping is defined with short
+#'   ICD-9 codes (TRUE, the default), or decimal if set to FALSE.
 #' @param validateMapping logical, whether to validate all the ICD-9 codes in
 #'   the mapping list. Default is not to check. If validation fails, stop with
 #'   an error. This is probably worth doing at least once for each mapping used,
 #'   since there should never be an error in mapping. There is overhead to check
 #'   the mapping each time, so not done by default. Could consider using
 #'   \code{memoise} to cache the result of the check. (TODO)
-#' @param isShortMapping logical, whether the mapping is defined with short ICD-9
-#'   codes (TRUE, the default), or decimal if set to FALSE.
+#' @template isShort
+#' @param doWithCpp single logical, whether to use C++ implementation. Really
+#'   just for testing and benchmarks. Do not use. Defaults to TRUE.
 #' @export
-icd9Comorbidities <- function(icd9df,
-                              visitId = "visitId",
-                              icd9Field = "icd9",
+icd9Comorbidities <- function(visitId,
+                              icd9,
                               icd9Mapping = ahrqComorbid,
+                              isShort = TRUE,
+                              isShortMapping = TRUE,
                               validateMapping = FALSE,
-                              isShortMapping = TRUE) {
+                              doWithCpp = TRUE) {
 
-  stopifnot(visitId %in% names(icd9df), icd9Field %in% names(icd9df))
+  stopifnot(length(icd9) == length(visitId))
+  stopifnot(is.character(visitId), is.character(icd9))
+  stopifnot(is.list(icd9Mapping))
+  stopifnot(length(doWithCpp) ==1, is.logical(doWithCpp))
 
   if (is.character(icd9Mapping)) {
     stopifnot(exists(icd9Mapping))
     icd9Mapping <- get(icd9Mapping)
   }
 
-  stopifnot(icd9ValidMapping(icd9Mapping = icd9Mapping, isShort = isShortMapping))
+  if (validateMapping) stopifnot(icd9ValidMapping(icd9Mapping = icd9Mapping, isShort = isShortMapping))
 
-  # loop through names of icd9 mapping, and put the results together so each
-  # column is one comorbidity in a data frame. This is much faster with vapply,
-  # and it keeps the logicals instead of making them characters
+  # todo: include validation here
+  visitId <- asCharacterNoWarn(visitId)
+
+  if (!isShort) icd9 <- icd9DecimalToShort(icd9)
+  if (!isShortMapping) icd9Mapping <- icd9MappingDecimalToShort(icd9Mapping)
+
+  icd9Short <- asCharacterNoWarn(icd9)
+
+  # TODO - pad zeros on both sides?
+  # TODO - tests to cover this
+  do.call(
+    ifelse(doWithCpp, "icd9ComorbiditiesLongCpp", "icd9ComorbiditiesLongR"),
+    list(
+      visitId = visitId,
+      icd9Short = icd9Short,
+      icd9Mapping = icd9Mapping
+    )
+  )
+}
+
+# loop through names of icd9 mapping, and put the results together so each
+# column is one comorbidity in a data frame. This is much faster with vapply,
+# and it keeps the logicals instead of making them characters, but still very
+# slow.
+icd9ComorbiditiesLongR <- function(visitId, icd9Short, icd9Mapping = ahrqComorbid) {
+  # TODO: temporarily just reconstruct the previous data frame, although this is
+  # definitely going to be slower
+  icd9df <- data.frame(visitId = visitId, icd9Short = icd9Short, stringsAsFactors = FALSE)
   i <- cbind(
-    icd9df[visitId],
+    icd9df['visitId'],
     vapply(
       X = names(icd9Mapping),
-      FUN.VALUE = rep(FALSE, length(icd9df[[icd9Field]])),
+      FUN.VALUE = rep(FALSE, length(icd9df[['icd9Short']])),
       FUN = function(comorbidity) {
         icd9InReferenceCode(
           # drop factor down to character codes #TODO: is this necessary or desirable?
-          asCharacterNoWarn(icd9df[[icd9Field]]),
+          asCharacterNoWarn(icd9df[['icd9Short']]),
           # provide vector of base ICD9 codes for this comorbidity group
           icd9Mapping[[comorbidity]]
         )
       }
     )
   )
-  aggregate(
-    x = i[, -which(names(i) == visitId)], # all cols except visit ID will be aggregated
-    by = list(visitId = i[[visitId]]), # group by the visitId
+
+  ag <- aggregate(
+    . ~ visitId,
+    data = i,
     FUN = any,
     simplify = TRUE
   )
+  mout <- as.matrix(ag[-1]) # drop visitId
+  rownames(mout) <- ag[['visitId']]
+  mout
 }
 
 #' @rdname icd9Comorbidities
@@ -209,20 +237,20 @@ icd9Comorbidities <- function(icd9df,
 #'   one of "Y", "N", "E", "X", "U" or empty. The poaField is a character vector
 #'   of length one.
 #' @export
-icd9ComorbiditiesNotPoa <- function(icd9df, icd9Mapping, visitId = "visitId",
+icd9ComorbiditiesNotPoa <- function(icd9df, icd9Mapping, visitIdField = "visitId",
                                     icd9Field = "icd9Code", poaField = "poa") {
   stopifnot(poaField %in% names(icd9df))
   icd9Comorbidities(icd9df[ is.na(icd9df[[poaField]]) | icd9df[[poaField]] != "N",],
-                    visitId=visitId, icd9Field=icd9Field, icd9Mapping=icd9Mapping)
+                    visitIdField=visitIdField, icd9Field=icd9Field, icd9Mapping=icd9Mapping)
 }
 
 #' @rdname icd9Comorbidities
 #' @title gets those comorbidities where the "Present on Arrival" (POA) flag is
 #'   set to "Y"
 #' @export
-icd9ComorbiditiesPoa <- function(icd9df, icd9Mapping, visitId = "visitId",
+icd9ComorbiditiesPoa <- function(icd9df, icd9Mapping, visitIdField = "visitId",
                                  icd9Field = "icd9Code", poaField = "poa") {
   stopifnot(poaField %in% names(icd9df))
   icd9Comorbidities(icd9df[!is.na(icd9df[[poaField]]) & icd9df[[poaField]] == "Y",],
-                    visitId = visitId, icd9Field = icd9Field, icd9Mapping = icd9Mapping)
+                    visitIdField = visitIdField, icd9Field = icd9Field, icd9Mapping = icd9Mapping)
 }
