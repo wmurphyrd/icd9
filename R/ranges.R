@@ -79,11 +79,13 @@ icd9ChildrenShort <- function(icd9Short, invalidAction = icd9InvalidActions) {
 #' @rdname icd9ChildrenShort
 #' @template icd9-any
 #' @template isShort
+#' @template invalid
 #' @family ICD-9 ranges
 #' @keywords internal
-icd9Children <- function(icd9, isShort) {
-  if (isShort) return(icd9ChildrenShort(icd9))
-  icd9ChildrenDecimal(icd9)
+icd9Children <- function(icd9, isShort, invalidAction = icd9InvalidActions) {
+  ia = match.arg(invalidAction)
+  if (isShort) return(icd9ChildrenShort(icd9Short = icd9, invalidAction = ia))
+  icd9ChildrenDecimal(icd9Decimal = icd9, invalidAction = ia)
 }
 
 #' @title sort short-form icd9 codes
@@ -499,3 +501,23 @@ appendZeroToNine <- function(str) {
   if (!allIsNumeric(str)) stop("appendZeroToNine expects number input, or character input representing numbers")
   apply(expand.grid(str, as.character(0:9),""), 1, paste, collapse="")
 }
+
+
+#' @title generate complete ordered list of ICD-9 codes
+#' @description internal function to generate icd9 lookup tables
+#' @note this needs a lot of work: just lifted from another project.
+#' @return vector of all codes
+#' @keywords internal manip
+generateIcd9Lookup <- function() {
+  icd9LookupShort <- icd9Sort(icd9GenerateShort())
+  icd9LookupShortV <- icd9Sort(icd9GenerateShortV())
+  icd9LookupShortE <- icd9Sort(icd9GenerateShortE())
+  icd9LookupDecimal <- icd9ShortToDecimal(icd9LookupShort)
+  icd9LookupDecimalV <- icd9ShortToDecimal(icd9LookupShortV)
+  icd9LookupDecimalE <- icd9ShortToDecimal(icd9LookupShortE)
+  save(
+    list=c("icd9LookupShort",   "icd9LookupShortV",   "icd9LookupShortE",
+           "icd9LookupDecimal", "icd9LookupDecimalV", "icd9LookupDecimalE"),
+    file= pathOfInternalData("icd9Lookup.RData"), compress="xz")
+}
+

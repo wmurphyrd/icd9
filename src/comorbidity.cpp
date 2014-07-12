@@ -14,6 +14,8 @@ typedef std::pair<ViMapTypeIt, ViMapTypeIt> ViPairItType;
 typedef std::vector<std::string> StrVec;
 typedef StrVec::iterator StrVecIt;
 
+bool debug = false;
+
 //' @name cvToVs
 //' @title convert CharacterVector to C++ vector of strings
 //' @description inverse of Rcpp::CharacterVector::create
@@ -41,18 +43,20 @@ std::vector<std::string> cvToVs(Rcpp::CharacterVector cv) {
 //' @import Rcpp
 std::vector<std::pair<std::string, std::set<std::string> > > icd9MappingToVectorSetsCpp(Rcpp::List icd9Mapping) {
 
+  if (debug) { std::cout << "icd9MappingToVectorSetsCpp\n"; }
+
   CbdPairVecType cpv;
   Rcpp::StringVector svMapNames;
   Rcpp::CharacterVector oneMapOfIcd9s;
 
-int maplen = icd9Mapping.size();
+  int maplen = icd9Mapping.size();
 
   svMapNames = icd9Mapping.attr("names");
 
   StrVec cNames = cvToVs(svMapNames);
 
   for (StrVecIt cnm = cNames.begin(); cnm != cNames.end(); ++cnm) {
-    // std::cout << *it << "\n"; // it works
+    if (debug) { std::cout << *cnm << ", "; }
     // get list for current comorbidity name
     oneMapOfIcd9s = icd9Mapping[*cnm];
     Icd9Set icd9s;
@@ -61,6 +65,7 @@ int maplen = icd9Mapping.size();
     CbdPairType oneComorbidityPair = std::make_pair(*cnm, icd9s); // pair up name to icd9 codes for one comorbidity
     cpv.push_back(oneComorbidityPair); // put the pair in new c++ comorbidity map
   }
+  if (debug) { std::cout << "\n"; }
   return(cpv);
 }
 
@@ -73,6 +78,9 @@ int maplen = icd9Mapping.size();
 //' @import Rcpp
 // [[Rcpp::export]]
 Rcpp::LogicalMatrix icd9ComorbiditiesRaggedCpp(Rcpp::CharacterVector vipCodes, Rcpp::CharacterVector icd9Short, Rcpp::List icd9Mapping) {
+
+  if (debug) { std::cout << "icd9ComorbiditiesRaggedCpp\n"; }
+
   Rcpp::CharacterVector comorbids = icd9Mapping.names();
   int nComorbids = comorbids.size();
   int nVipCodes = vipCodes.size();
@@ -129,7 +137,7 @@ Rcpp::LogicalMatrix icd9ComorbiditiesRaggedCpp(Rcpp::CharacterVector vipCodes, R
 //' @import Rcpp
 // [[Rcpp::export]]
 Rcpp::LogicalMatrix icd9ComorbiditiesLongCpp(Rcpp::CharacterVector visitId, Rcpp::CharacterVector icd9Short, Rcpp::List icd9Mapping) {
-
+  if (debug) { std::cout << "icd9ComorbiditiesLongCpp\n"; }
   // convert my list of character vectors to a map of sets of strings, pure std/c++
   CbdPairVecType cMap;
   ViMapType viMap;
@@ -138,7 +146,11 @@ Rcpp::LogicalMatrix icd9ComorbiditiesLongCpp(Rcpp::CharacterVector visitId, Rcpp
 
 
   int nVisitId = visitId.size();
-  uniqueVisitId = unique(visitId); // can probably avoid this now i have a mapping
+  // Rcpp::unique, then sort is horrible. what about a set? didn't do this before because I didn't want to deal with ordering a custom pair<string, string>
+  // also note C++ unique is different to Rcpp::unique (the former only drops consecutive identical values)
+  uniqueVisitId = Rcpp::unique(visitId);
+  std::sort(uniqueVisitId.begin(), uniqueVisitId.end());
+
   int nUniqueVisitId = uniqueVisitId.size();
   int nMappingComorbids = icd9Mapping.size();
 
@@ -148,13 +160,17 @@ Rcpp::LogicalMatrix icd9ComorbiditiesLongCpp(Rcpp::CharacterVector visitId, Rcpp
   StrVec cppUniqueVisitId =  cvToVs(uniqueVisitId);
 
   cMap = icd9MappingToVectorSetsCpp(icd9Mapping);
+
   // turns out to be difficult to initialize maps from two vectors without boost or C++11:
   // TODO: consider using unordered_map C++11 or std::tr1 , but also available in std/tr1
   //std::unordered_map<Rcpp::CharacterVector> visitIdSet ( visitId );
   // this loop is probably expensive in time.
+  if (debug) std::cout << "loop through visits to build vector of pairs for input data 'frame'\n";
   for (int ivi=0; ivi<nVisitId; ivi++) {
+    if (debug) std::cout << ivi << ", ";
     viMap.insert(std::pair<std::string, std::string>(cppVisitId[ivi], cppIcd9Short[ivi]));
   }
+  if (debug) { std::cout << "\n"; }
   // now we have a map to lookup icd9 codes for each unique visit Id. this is
   // likely to be more efficient with unordered list. Current assumption is that
   // the visitIds are to be returned sorted, which is reasonable, but should be
@@ -165,18 +181,25 @@ Rcpp::LogicalMatrix icd9ComorbiditiesLongCpp(Rcpp::CharacterVector visitId, Rcpp
   //std::cout << "rows: " << out.nrow() << ", ";
   //std::cout << "cols: " << out.ncol() << "\n";
   // name the rows and cols up front, so we can reference the cols by name. This may be much slower...
+  if (debug) { std::cout << "make list of the comorbidity names\n"; }
   for(CbdPairVecTypeIt it = cMap.begin(); it != cMap.end(); ++it) {
+    if (debug) { std::cout << it->first << ", "; }
     cbdNames.push_back(it->first); // pair.second is the map.
   }
+  if (debug) { std::cout << "\n"; }
 
-  // name the dimensions
+  if (debug) { Rf_PrintValue(uniqueVisitId); }
+
+// name the dimensions
   Rcpp::List rcnames = Rcpp::List::create(uniqueVisitId, cbdNames);
   out.attr("dimnames") = rcnames;
   std::string icd9CodeToCheck;
 
   // iterate through unique ids // should be able to avoid needing unique()
+  if (debug) { std::cout << "main loop (through unique visit ids\n"; }
+
   for (StrVec::iterator vit=cppUniqueVisitId.begin(); vit!=cppUniqueVisitId.end(); ++vit) {
-    //std::cout << "icd code to check: " << icd9CodeToCheck << "\n";
+    if (debug) {std::cout << "visit id: " << *vit << "\n";}
     // now we can use the map structure to find the comorbidities, but not an iterator, since we need to make a matrix index... can't see a way to string index the matrix
     //for (CbdMapType::iterator it = cm.begin(); it != cm.end(); ++it) {
 
@@ -191,6 +214,7 @@ Rcpp::LogicalMatrix icd9ComorbiditiesLongCpp(Rcpp::CharacterVector visitId, Rcpp
     // we then iterate through the range, with each iterator providing a multimap type
     for (ViMapTypeIt iit = viPair.first; iit != viPair.second; ++iit) {
       icd9CodeToCheck = iit->second; // equivalent to (*iit).second (first is the icd9 code in this case)
+      if (debug) { std::cout << "icd code to check: " << icd9CodeToCheck << "\n"; }
 
       // have a single icd9 code for a single visit, now look it up in the comorbidities:
       //for (int cit = 0; cit < nMappingComorbids; cit++) { // use iterator and distance instead of numbers
@@ -201,9 +225,11 @@ Rcpp::LogicalMatrix icd9ComorbiditiesLongCpp(Rcpp::CharacterVector visitId, Rcpp
         //std::cout << *vit << "\n";
         int vIndex = std::distance(cppUniqueVisitId.begin(), vit);
         int cIndex = std::distance(cMap.begin(), cit);
-        //std::cout << "v index = " << vIndex << "\n";
-        //std::cout << "c index = " << cIndex << "\n";
-        //std::cout << icd9CodeToCheck << "\n";
+        if (debug) {
+          std::cout << "v index = " << vIndex << ", ";
+          std::cout << "c index = " << cIndex << "\n";
+          //std::cout << icd9CodeToCheck << "\n";
+        }
         out(vIndex, cIndex) = 1; // row x col
         } // end if matched
       } // end loop through mapping

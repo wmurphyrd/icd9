@@ -1,6 +1,49 @@
 context("comorbidities, slow tests")
 
 #randomSampleAhrq <- sample(unname(c(ahrqComorbid, recursive = TRUE)), replace = TRUE, size = n)
+
+testOnePatientOneDzOneCbd <- data.frame(
+  visitId = "patcom100",
+  icd9 = "4280",
+  poa = "Y",
+  stringsAsFactors = FALSE
+)
+
+testOnePatientTwoDzOneCbd <- data.frame(
+  visitId = c("patcom100", "patcom100"),
+  icd9 = c("4280", "4286"),
+  poa = c("Y", "N"),
+  stringsAsFactors = FALSE
+)
+
+testOnePatientTwoDzTwoCbd <- data.frame(
+  visitId = c("patcom100", "patcom100"),
+  icd9 = c("4280", "3979"),
+  poa = c("Y", "N"),
+  stringsAsFactors = FALSE
+)
+
+testTwoPatientOneDzOneCbd <- data.frame(
+  visitId = c("patcom100", "patcom222"),
+  icd9 = c("4280", "4280"),
+  poa = c("Y", "N"),
+  stringsAsFactors = FALSE
+)
+
+testTwoPatientTwoDzOneCbd <- data.frame(
+  visitId = c("patcom100", "patcom222"),
+  icd9 = c("4280", "4286"),
+  poa = c("Y", "N"),
+  stringsAsFactors = FALSE
+)
+
+testTwoPatientTwoDzTwoCbd <- data.frame(
+  visitId = c("patcom100", "patcom222"),
+  icd9 = c("4280", "3979"),
+  poa = c("Y", "N"),
+  stringsAsFactors = FALSE
+)
+
 testSimplePatients <- data.frame(
   visitId = as.character(c(1000, 1000, 1000, 1001, 1001, 1002)),
   icd9 = c("27801", "7208", "25001", "34400", "4011", "4011"),
@@ -20,38 +63,36 @@ testRandomPatients <- data.frame(
 )
 
 # not real data, but designed to be similar
-testRealPatients <- structure(
-  list(visitId = as.character(c(207210584L, 207210584L, 207210584L,
-                                207210584L, 207210584L, 207210600L, 207210600L,
-                                207210600L, 207210600L, 207210600L, 207210600L,
-                                207210600L, 207210600L, 207210600L, 207210600L,
-                                207210600L, 207210600L, 207210600L, 207210618L, 207210618L)),
-       icd9 = c("19907", "V4346", "26189", "19318", "20149", "30434", "14291",
-                "28012", "24940", "3431", "20971", "20040", "24948", "28063",
-                "16876", "30048", "16502", "1797", "16016", "20914"),
-       poa = c("N", "N", "N", "Y", "Y", "Y", "Y", "Y", "Y", "Y",
-               "Y", "Y", "Y", "Y", "E", "E", "Y", "Y", "Y", "N")),
-  .Names = c("visitId", "icd9", "poa"),
-  class = "data.frame"
+testRealPatients <- data.frame(
+  visitId = as.character(c(207210584L, 207210584L, 207210584L,
+                           207210584L, 207210584L, 207210600L, 207210600L,
+                           207210600L, 207210600L, 207210600L, 207210600L,
+                           207210600L, 207210600L, 207210600L, 207210600L,
+                           207210600L, 207210600L, 207210600L, 207210618L, 207210618L)),
+  icd9 = c("19907", "V4346", "26189", "19318", "20149", "30434", "14291",
+           "28012", "24940", "3431", "20971", "20040", "24948", "28063",
+           "16876", "30048", "16502", "1797", "16016", "20914"),
+  poa = c("N", "N", "N", "Y", "Y", "Y", "Y", "Y", "Y", "Y",
+          "Y", "Y", "Y", "Y", "E", "E", "Y", "Y", "Y", "N"),
+  stringsAsFactors = FALSE
 )
 
 #TODO: tests for these:
-#testMultiDzOnePat
-#testMultiDzMultiPats
 #testEmptyInvalidPats
+#test ragged input
 
-#testRagged
-
+testAllDataFrameNames <- c("testOnePatientOneDzOneCbd", "testOnePatientTwoDzOneCbd", "testOnePatientTwoDzTwoCbd",
+                       "testTwoPatientOneDzOneCbd", "testTwoPatientTwoDzOneCbd", "testTwoPatientTwoDzTwoCbd",
+                       "testSimplePatients", "testRandomPatients", "testRealPatients")
 
 # test that the C++ version always give the same results as the R version:
 # doesn't mean they're right, of course.
-for (p in c("testSimplePatients", "testRandomPatients", "testRealPatients")) {
+for (p in testAllDataFrameNames) {
   pts <- get(p)
-  test_that(paste("R and C++ gives same result with ", p), {
+  test_that(paste("R and C++ gives same result with data:", p), {
     expect_identical(
       icd9Comorbidities(visitId = pts$visitId, icd9 = pts$icd9, icd9Mapping = ahrqComorbid, doWithCpp = TRUE),
-      icd9Comorbidities(visitId = pts$visitId, icd9 = pts$icd9, icd9Mapping = ahrqComorbid, doWithCpp = FALSE),
-      info = p)
+      icd9Comorbidities(visitId = pts$visitId, icd9 = pts$icd9, icd9Mapping = ahrqComorbid, doWithCpp = FALSE))
   })
 }
 
@@ -82,19 +123,19 @@ test_that(paste("non-character icd9 input with"), {
   # todo: what to do with factors?
 })
 
-test_that(paste("icd9 comorbidities using"), {
 
-  for (pts in c(testSimplePatients, testRandomPatients, testRealPatients)) {
-    p <- get(pts)
+for (p in testAllDataFrameNames) {
+  pts <- get(p)
+  test_that(paste("icd9 comorbidities using data:", p), {
     for (tf in c(TRUE, FALSE)) {
-      m <- icd9Comorbidities(visitId = p$visitId, icd9 = p$icd9, icd9Mapping = ahrqComorbid, doWithCpp = tf)
+      m <- icd9Comorbidities(visitId = pts$visitId, icd9 = pts$icd9, icd9Mapping = ahrqComorbid, doWithCpp = tf)
       expect_equal(colnames(m), names(ahrqComorbid), info = p)
-      expect_equal(sort(unique(asCharacterNoWarn(p$visitId))), sort(rownames(m)), info = p) # should match exactly, but no order guarantee?
+      expect_equal(sort(unique(asCharacterNoWarn(pts$visitId))), sort(rownames(m)), info = p) # should match exactly, but no order guarantee?
       expect_is(m, "matrix", info = p)
       expect_equal(typeof(m), "logical", info = p)
     } # end for T/F
-  } # end for test datasets
-})
+  }) # end test_that
+} # end for test datasets
 
 
 # ptdflogical <- logicalToBinary(ptdf)  # TODO: test elsewhere
@@ -200,4 +241,11 @@ test_that("HTN subgroups all worked", {
   expect_true(all(ahrqComorbidAll$CHF %in% ahrqComorbid$CHF))
   expect_true(all(ahrqComorbidAll$RENLFAIL %in% ahrqComorbid$RENLFAIL))
 
+})
+
+test_that("Charlson Deyo mapping doesn't double count disease with multiple severities", {
+  # there should be no overlapping codes
+  expect_true(any(quanDeyoComorbid[["Mild Liver Disease"]] %in% quanDeyoComorbid[["Moderate or Severe Liver Disease"]] ))
+  expect_true(any(quanDeyoComorbid[["Cancer"]] %in% quanDeyoComorbid[["Metastatic Carcinoma"]] ))
+  expect_true(any(quanDeyoComorbid[["Diabetes without complications"]] %in% quanDeyoComorbid[["Diabetes with complications"]] ))
 })

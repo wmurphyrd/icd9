@@ -243,7 +243,9 @@ test_that("icd9InReferenceCodeLong", {
   expect_error(icd9InReferenceCode(c("100.1", "200"), "200", invalidAction = "stop")) # not expecting decimals in input data
   expect_equal(icd9InReferenceCode(c("100.1", "200"), "200", validate = FALSE), c(FALSE, TRUE))
 
-  expect_identical(icd9InReferenceCode(c("2501", "25001", "999"), c("V101", "250")), c(TRUE, TRUE, FALSE))
+  expect_identical(icd9InReferenceCode(c("2501", "25001", "999"), c("V101", "250"), spawnRefChildren = TRUE), c(TRUE, TRUE, FALSE))
+  expect_identical(icd9InReferenceCode(c("2501", "25001", "999"), c("V101", "250"), spawnRefChildren = FALSE), c(FALSE, FALSE, FALSE))
+  expect_identical(icd9InReferenceCode(c("2501", "25001", "999"), c("V101", "250", "2501", "25001"), spawnRefChildren = FALSE), c(TRUE, TRUE, FALSE))
 
   #ni = runif(n=1000000, min=100, max=99999) # create a large set of valid icd9 codes (of the integer variety)
   # ni <- c(36211,

@@ -6,8 +6,8 @@
 #' PC, so would benefit from memoization.
 #'
 #' @keywords internal
-spawnReferenceChildren <-
-  function(icd9Reference, isShortReference) {
+#' @import memoise
+icd9SpawnReferenceChildren <- function(icd9Reference, isShortReference) {
     c(
       lapply(
         icd9Reference,
@@ -17,23 +17,42 @@ spawnReferenceChildren <-
     )
   }
 
+# this runs outside of a function, on package load
+
+# this is necessary because repeated memoisation drops the cache, so can't just
+# put this in a function.
+library(memoise)
+memSpawnReferenceChildren <- memoise::memoise(icd9SpawnReferenceChildren)
+
 #' @title match ICD9 codes
 #' @aliases "%i9in%"
 #' @description This does the hard work of finding whether a given icd9 code
-#'   falls under a group of reference ICD9 codes. icd9Reference is expanded to cover
-#'   all possible subgroups, then we look for matches where the given ICD9 codes
-#'   appear in the icd9Reference.
+#'   falls under a group of reference ICD9 codes. icd9Reference is expanded to
+#'   cover all possible subgroups, then we look for matches where the given ICD9
+#'   codes appear in the icd9Reference.
 #'   http://www.acep.org/Clinical---Practice-Management/V-and-E-Codes-FAQ/
 #' @seealso comorbidities.
 #' @templateVar icd9AnyName "icd9,icd9Reference"
 #' @template icd9-any
 #' @template isShort
-#' @template validate
 #' @param isShortReference logical, see argument \code{isShort}
+#' @template validate
+#' @param validateReference single logical value, whether to validate the list
+#'   of reference ICD-9 codes
+#' @param spawnRefChildren make an expensive call to icd9SpawnReference children.
+#'   This may be memoised for speed. Default is not to do this, and indeed all
+#'   the included co-morbidities are tested to ensure they already contain all
+#'   the synactically valid children of themselves.
 #' @return logical vector of which icd9 match or are subcategory of
-#'   icd9Referenec
+#'   icd9Reference
 #' @keywords internal
-icd9InReferenceCode <- function(icd9, icd9Reference, isShort = TRUE, isShortReference = TRUE, validate = FALSE, validateReference = FALSE) {
+icd9InReferenceCode <- function(icd9,
+                                icd9Reference,
+                                isShort = TRUE,
+                                isShortReference = TRUE,
+                                validate = FALSE,
+                                validateReference = FALSE,
+                                spawnRefChildren = FALSE) {
 
   if (!class(icd9) %in% c("character", "numeric", "integer"))
     stop("icd9InReferenceCode expects a character or number vector for icd9, but got: ", class(icd9))
@@ -56,13 +75,14 @@ icd9InReferenceCode <- function(icd9, icd9Reference, isShort = TRUE, isShortRefe
   if (validate) stopIfInvalidIcd9(icd9, isShort = isShort)
   if (validateReference) stopIfInvalidIcd9(icd9Reference, isShort = isShortReference)
 
-  kids <- spawnReferenceChildren(icd9Reference, isShortReference)
-
   # convert to short form to make comparison
   if (isShort == FALSE) icd9 <- icd9DecimalToShort(icd9)
-  if (isShortReference == FALSE) kids <- icd9DecimalToShort(kids)
+  if (isShortReference == FALSE) icd9Reference <- icd9DecimalToShort(icd9Reference)
 
-  icd9 %in% kids
+  # we enforce all the children being in the mapping already in the tests, but user supplied mappings may need fixing up:
+  if (spawnRefChildren) icd9Reference <- memSpawnReferenceChildren(icd9Reference, isShortReference = TRUE)
+
+  icd9 %in% icd9Reference
 }
 
 #' @rdname icd9InReferenceCode
@@ -197,21 +217,25 @@ icd9ComorbiditiesLongR <- function(visitId, icd9Short, icd9Mapping = ahrqComorbi
   # TODO: temporarily just reconstruct the previous data frame, although this is
   # definitely going to be slower
   icd9df <- data.frame(visitId = visitId, icd9Short = icd9Short, stringsAsFactors = FALSE)
+  # drop factor down to character codes #TODO: is this necessary or desirable?
+  ic <- asCharacterNoWarn(icd9df[['icd9Short']])
   i <- cbind(
-    icd9df['visitId'],
-    vapply(
-      X = names(icd9Mapping),
-      FUN.VALUE = rep(FALSE, length(icd9df[['icd9Short']])),
-      FUN = function(comorbidity) {
-        icd9InReferenceCode(
-          # drop factor down to character codes #TODO: is this necessary or desirable?
-          asCharacterNoWarn(icd9df[['icd9Short']]),
-          # provide vector of base ICD9 codes for this comorbidity group
-          icd9Mapping[[comorbidity]]
-        )
-      }
-    )
-  )
+    visitId = icd9df['visitId'],
+    matrix(
+      nrow = length(icd9df[['icd9Short']]),
+      data = vapply(
+        X = names(icd9Mapping),
+        FUN.VALUE = rep(FALSE, length(icd9df[['icd9Short']])),
+        FUN = function(comorbidity) {
+          icd9InReferenceCode( # this does ic %in% icd9Mapping[[comorbidity]] but with sanity checks
+            ic,
+            icd9Mapping[[comorbidity]] # vector of the base ICD9 codes for a comorbidity
+          )
+        } # end FUN
+      ) # end vapply
+    ) # end matrix
+  ) # end cbind
+  colnames(i) <- c("visitId", names(icd9Mapping)) # force matrix so that n=1 doesn't give stupid output.
 
   ag <- aggregate(
     . ~ visitId,
