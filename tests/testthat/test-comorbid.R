@@ -112,9 +112,9 @@ if (!doSlowTests) { message("skipping slow tests") } else {
 
     expect_equal(names(ptdf), c("visitId", names(ahrqComorbid)))
 
-    expect_true(all(sapply(names(ahrqComorbid), function(x) class(ptdf[, x])) == "logical"))
+    expect_true(all(sapply(names(ahrqComorbid), function(x) is.logical(ptdf[, x]))))
     ptdflogical <- logicalToBinary(ptdf)
-    expect_true(all(sapply(names(ahrqComorbid), function(x) class(ptdflogical[, x])) == "integer"))
+    expect_true(all(sapply(names(ahrqComorbid), function(x) is.integer(ptdflogical[, x]))))
     # do not expect all the rest of patient data to be returned - we aren't
     # responsible for aggregating other fields by visitId!
     expect_equal(dim(ptdf), c(length(unique(patientData[["visitId"]])), 1 + length(ahrqComorbid)))

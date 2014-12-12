@@ -121,7 +121,7 @@ icd9ValidDecimal <- function(icd9Decimal) {
     #warning("icd9ValidDecimal expects at least one code to test")
     return(logical())
   }
-  if (class(icd9Decimal) != "character" & class(icd9Decimal) != 'factor')
+  if (!is.character(icd9Decimal) & !is.factor(icd9Decimal))
     stop("icd9ValidDecimal expects factor or character vector input but got class: ",
          class(icd9Decimal), ". Numeric disallowed because of ambiguitities.")
 
@@ -146,7 +146,7 @@ icd9ValidShort <- function(icd9Short) {
     return(logical())
   }
 
-  if (!(class(icd9Short) %in% c("character", "factor"))) {
+  if (!is.character(icd9Short) && !is.factor(icd9Short)) {
     stop("isValidShortICD9 expects character vector input. Numeric is
           ambiguous, so not allowed (although integers would not be ambiguous, simpler
           to stick to character-only.")

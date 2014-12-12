@@ -85,8 +85,9 @@ icd9ShortToMajor <- function(icd9Short, invalidAction = icd9InvalidActions) {
 #' @keywords manip
 #' @export
 icd9ShortToDecimal <- function(icd9Short, invalidAction = icd9InvalidActions) {
-  # prevalidate regardless of invalidAction - TODO: ensure this is done consistently for every public entry point.
-  if (class(icd9Short) != "character")
+  # prevalidate regardless of invalidAction - TODO: ensure this is done
+  # consistently for every public entry point.
+  if (!is.character(icd9Short))
     stop("icd9Short must be a character: number values could be ambiguous if converted blindly to character")
 
   if (length(icd9Short) == 0) return(character()) # question whether an empty vector is valid?
@@ -161,7 +162,7 @@ icd9ShortToPartsE <- function(icd9Short) {
 #' @keywords internal
 icd9PartsRecompose <- function(parts, isShort, invalidAction = icd9InvalidActions) {
   invalidAction <- match.arg(invalidAction)
-  stopifnot(class(isShort) == "logical")
+  stopifnot(is.loical(isShort))
 
   sep = "."
   if (isShort) sep = ""

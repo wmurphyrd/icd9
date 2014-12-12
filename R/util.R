@@ -12,8 +12,12 @@
 #' @keywords internal manip
 logicalToBinary <- function(dframe) {
 
-  if (class(dframe) != 'data.frame') stop("logicalToBinary expects a data frame, but got %s", class(dframe))
-  if (any(dim(dframe) == 0)) stop("got zero in at least one dimension in data frame. %d, %d", dim(dframe)[1], dim(dframe)[2])
+  if (!is.data.frame(dframe))
+    stop("logicalToBinary expects a data frame, but got %s", class(dframe))
+
+  if (any(dim(dframe) == 0))
+    stop("got zero in at least one dimension in data frame. %d, %d",
+         dim(dframe)[1], dim(dframe)[2])
 
   # can condense this code into a one-liner, but this is clearer:
   logicalFields <- names(dframe)[sapply(dframe,class)=='logical']
@@ -116,7 +120,7 @@ allIsNumeric <- function(x, extras=c('.','NA')) {
 asCharacterNoWarn <- function(x) {
   old <- options(warn = -1)
   on.exit(options(old))
-  if (class(x)=='factor') x <- levels(x)[x]
+  if (is.factor(x)) x <- levels(x)[x]
   as.character(x)
 }
 
@@ -132,7 +136,7 @@ asCharacterNoWarn <- function(x) {
 asNumericNoWarn <- function(x) {
   old <- options(warn = -1)
   on.exit(options(old))
-  if (class(x)=='factor') x <- levels(x)[x]
+  if (is.factor(x)) x <- levels(x)[x]
   as.numeric(x)
 }
 

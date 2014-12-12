@@ -54,12 +54,9 @@ icd9InReferenceCode <- function(icd9, icd9Reference,
                                 invalidAction = icd9InvalidActions,
                                 invalidActionReference = icd9InvalidActions) {
 
-  if (!class(icd9) %in% c("character", "numeric", "integer"))
-    stop("icd9InReferenceCode expects a character or number vector for icd9, but got: ", class(icd9))
-  if (!class(icd9Reference) %in% c("character", "numeric", "integer"))
-    stop("icd9InReferenceCode expects a character or number vector for the basecodes,
-         to avoid ambiguity with trailing zeroes, but got: ", class(icd9Reference))
-  stopifnot(class(isShort) == 'logical', class(isShortReference) == "logical")
+  stopifnot(is.numeric(icd9) || is.character(icd9))
+  stopifnot(is.numeric(icd9Reference) || is.character(icd9Reference))
+  stopifnot(is.logical(isShort), is.logical(isShortReference))
 
   if (length(isShort) >  1)
     stop("icd9InReferenceCode got vector for isShort, expected single TRUE or FALSE value")
