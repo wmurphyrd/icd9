@@ -31,7 +31,7 @@ spawnReferenceChildren <-
     )
   }
 
-# this runs outside of a function, on package load
+# this runs outside of a function, on package load, in package namespace
 library(memoise)
 memSpawnRefKids <- memoise::memoise(spawnReferenceChildren)
 
@@ -57,28 +57,27 @@ icd9InReferenceCode <- function(icd9, icd9Reference,
   stopifnot(is.numeric(icd9) || is.character(icd9))
   stopifnot(is.numeric(icd9Reference) || is.character(icd9Reference))
   stopifnot(is.logical(isShort), is.logical(isShortReference))
+  stopifnot(length(isShort) ==  1, length(isShortReference) == 1)
+  stopifnot(length(icd9Reference) > 0)
 
-  if (length(isShort) >  1)
-    stop("icd9InReferenceCode got vector for isShort, expected single TRUE or FALSE value")
-  if (length(isShortReference) >  1)
-    stop("icd9InReferenceCode got vector for isShortReference, expected single TRUE or FALSE value")
-  if (length(isShort) == 0 )
-    stop("icd9InReferenceCode got empty vector for isShort, expected single TRUE or FALSE value")
-  if (length(isShortReference) == 0)
-    stop("icd9InReferenceCode got empty vector for isShortReference, expected single TRUE or FALSE value")
+  icd9 <- icd9ValidNaWarnStop(
+    icd9 = icd9, isShort = isShort, isMajor = FALSE,
+    invalidAction = match.arg(invalidAction))
+  icd9Reference <- icd9ValidNaWarnStop(
+    icd9 = icd9Reference, isShort = isShort, isMajor = FALSE,
+    invalidAction = match.arg(invalidActionReference))
 
-  if (length(icd9Reference) == 0)
-    stop("icd9InReferenceCode expects at least one icd9 code to test against")
-
-  icd9 <- icd9ValidNaWarnStop(icd9 = icd9, isShort = isShort, isMajor = FALSE, invalidAction = match.arg(invalidAction))
-  icd9Reference <- icd9ValidNaWarnStop(icd9 = icd9Reference, isShort = isShort, isMajor = FALSE, invalidAction = match.arg(invalidActionReference))
-
-  # TODO: this may be omitted if all the children are elaborated in the comorbidity mappings in advance. This is fine for ones I provide, but not necessarily user-generated ones. It is a slow step, hence memoisation. It would be simpler and faster if this could be skipped. I'm currently also elaborating all syntactically possible children, not just codes listed in the official ICD-9-CM list.
+  # TODO: this may be omitted if all the children are elaborated in the
+  # comorbidity mappings in advance. This is fine for ones I provide, but not
+  # necessarily user-generated ones. It is a slow step, hence memoisation. It
+  # would be simpler and faster if this could be skipped. I'm currently also
+  # elaborating all syntactically possible children, not just codes listed in
+  # the official ICD-9-CM list.
   kids <- memSpawnRefKids(icd9Reference, isShortReference)
 
   # convert to short form to make comparison
-  if (isShort == FALSE) icd9 <- icd9DecimalToShort(icd9)
-  if (isShortReference == FALSE) kids <- icd9DecimalToShort(kids)
+  if (!isShort) icd9 <- icd9DecimalToShort(icd9)
+  if (!isShortReference) kids <- icd9DecimalToShort(kids)
 
   icd9 %in% kids
 }
@@ -113,7 +112,7 @@ icd9InReferenceCode <- function(icd9, icd9Reference,
 #'   or "diabetes") and the contents of each list item being a character vector
 #'   of short-form (no decimal place but ideally zero left-padded) ICD-9 codes.
 #'   No default: user should prefer to use the derivative functions, e.g.
-#'   icd9ComorbiditiesAhrq, since these also provide appropriate naming for the
+#'   icd9ComorbidAhrq, since these also provide appropriate naming for the
 #'   fields, and squashing the hierarchy (see \code{applyHierarchy} below)
 #' @param validateMapping logical, whether to validate all the ICD-9 codes in
 #'   the mapping list. Default is not to check. If validation fails, stop with
@@ -123,7 +122,7 @@ icd9InReferenceCode <- function(icd9, icd9Reference,
 #'   ICD-9 codes (TRUE, the default), or decimal if set to FALSE.
 #' @template abbrevHier
 #' @export
-icd9Comorbidities <- function(icd9df,
+icd9Comorbid <- function(icd9df,
                               visitId = "visitId",
                               icd9Field = "icd9",
                               isShort,
@@ -131,6 +130,12 @@ icd9Comorbidities <- function(icd9df,
                               validateMapping = FALSE,
                               isShortMapping = TRUE) {
 
+  stopifnot(is.data.frame(icd9df))
+  stopifnot(is.character(visitId), length(visitId) == 1)
+  stopifnot(is.character(icd9Field), length(icd9Field) == 1)
+  stopifnot(is.logical(isShort), length(isShort) == 1)
+  stopifnot(is.logical(validateMapping), length(validateMapping) == 1)
+  stopifnot(is.logical(isShortMapping), length(isShortMapping) == 1)
   stopifnot(visitId %in% names(icd9df), icd9Field %in% names(icd9df))
 
   if (is.character(icd9Mapping)) {
@@ -138,7 +143,7 @@ icd9Comorbidities <- function(icd9df,
     icd9Mapping <- get(icd9Mapping)
   }
 
-  stopifnot(icd9ValidMapping(icd9Mapping = icd9Mapping, isShort = isShortMapping))
+  if (validateMapping) stopifnot(icd9ValidMapping(icd9Mapping, isShortMapping))
 
   # drop factor down to character codes #TODO: is this necessary or desirable?
   ic <- asCharacterNoWarn(icd9df[[icd9Field]])
@@ -147,36 +152,33 @@ icd9Comorbidities <- function(icd9df,
   # column is one comorbidity in a data frame. This is much faster with vapply,
   # and it keeps the logicals instead of making them characters
 
-  #TODO pre-allocate before big cbind
   i <- cbind(
     icd9df[visitId],
     vapply(
       X = names(icd9Mapping),
-      FUN.VALUE = rep(FALSE, length(icd9df[[icd9Field]])),
       # FUN looks up each visit icd9 code in given set of comorbidity icd9 codes
-      FUN = function(comorbidity) {
-        icd9InReferenceCode( # this function is just a fancy %in% with sanity checks
-          ic,
-          # provide vector of base ICD9 codes for this comorbidity group
-          icd9Mapping[[comorbidity]]
-        )
-      }
+      FUN = function(comorbidity)
+        icd9InReferenceCode( icd9 = ic,
+                             icd9Reference = icd9Mapping[[comorbidity]],
+                             isShort = isShort,
+                             isShortReference = isShortMapping),
+      FUN.VALUE = rep(FALSE, length(icd9df[[icd9Field]]))
     )
   )
   # at this point, 'i' still has multiple rows per visit, but with a column per
   # comorbidity: next step aggregates all the comorbidities together to give one
   # row per visitid
   aggregate(
-    x = i[, -which(names(i) == visitId)], # all cols except visit ID will be aggregated
-    by = list(visitId = i[[visitId]]), # group by the visitId
+    x = i[, names(i) != visitId],
+    by = list(visitId = i[[visitId]]),
     FUN = any,
     simplify = TRUE
   )
 }
 
-#' @rdname icd9Comorbidities
+#' @rdname icd9Comorbid
 #' @export
-icd9ComorbiditiesAhrq <- function(icd9df,
+icd9ComorbidAhrq <- function(icd9df,
                                   visitId = "visitId",
                                   icd9Field = "icd9",
                                   isShort,
@@ -184,8 +186,9 @@ icd9ComorbiditiesAhrq <- function(icd9df,
                                   abbrevNames = TRUE,
                                   applyHierarchy = TRUE) {
 
-  cbd <- icd9Comorbidities(icd9df = icd9df, visitId = visitId, icd9Field = icd9Field,
-                           isShort = isShort, icd9Mapping = ahrqComorbid)
+  cbd <- icd9Comorbid(icd9df = icd9df, visitId = visitId,
+                           icd9Field = icd9Field, isShort = isShort,
+                           icd9Mapping = icd9::ahrqComorbid)
   if (applyHierarchy) {
 
     # Use >0 rather than logical - apparently faster, and future proof against
@@ -195,29 +198,35 @@ icd9ComorbiditiesAhrq <- function(icd9df,
     cbd[["HTN"]] <- cbd[["HTN"]] + cbd[["HTNcx"]] > 0
     cbd[["HTNcx"]] <- NULL
 
-    if (abbrevNames) { names(cbd)[-1] <- ahrqComorbidNamesAbbrev } else { names(cbd)[-1] <- ahrqComorbidNames }
-    return(cbd)
+    if (abbrevNames)
+      names(cbd)[-1] <- icd9::ahrqComorbidNamesAbbrev
+    else
+      names(cbd)[-1] <- icd9::ahrqComorbidNames
   } else {
-    if (abbrevNames) { names(cbd)[-1] <- ahrqComorbidNamesHtnAbbrev } else { names(cbd)[-1] <- ahrqComorbidNamesHtn }
-    return(cbd)
+    if (abbrevNames)
+      names(cbd)[-1] <- icd9::ahrqComorbidNamesHtnAbbrev
+    else
+      names(cbd)[-1] <- icd9::ahrqComorbidNamesHtn
   }
+  cbd
 }
 
-#' @rdname icd9Comorbidities
+#' @rdname icd9Comorbid
 #' @description For Charlson-based comorbidities, strictly speaking, there is no
 #'   dropping of more e.g. uncomplicated DM if complicated DM exists, however,
 #'   this is probaably useful, in general and is essential when calculating the
 #'   Charlson score.
 #' @export
-icd9ComorbiditiesQuanDeyo <- function(icd9df,
+icd9ComorbidQuanDeyo <- function(icd9df,
                                       visitId = "visitId",
                                       icd9Field = "icd9",
                                       isShort,
                                       validateMapping = FALSE,
                                       abbrevNames = TRUE,
                                       applyHierarchy = TRUE) {
-  cbd <- icd9Comorbidities(icd9df = icd9df, visitId = visitId, icd9Field = icd9Field,
-                           isShort = isShort, icd9Mapping = quanDeyoComorbid)
+  cbd <- icd9Comorbid(icd9df = icd9df, visitId = visitId,
+                           icd9Field = icd9Field, isShort = isShort,
+                           icd9Mapping = icd9::quanDeyoComorbid)
   if (applyHierarchy) {
 
     # Use >0 rather than logical - apparently faster, and future proof against
@@ -226,21 +235,26 @@ icd9ComorbiditiesQuanDeyo <- function(icd9df,
     cbd[cbd[["DMcx"]] > 0, "DM"] <- FALSE
     cbd[cbd[["LiverSevere"]] > 0, "LiverMild"] <- FALSE
   }
-  if (abbrevNames) { names(cbd)[-1] <- charlsonComorbidNamesAbbrev } else { names(cbd)[-1] <- charlsonComorbidNames }
+  if (abbrevNames)
+    names(cbd)[-1] <- icd9::charlsonComorbidNamesAbbrev
+  else
+    names(cbd)[-1] <- icd9::charlsonComorbidNames
+
   cbd
 }
 
-#' @rdname icd9Comorbidities
+#' @rdname icd9Comorbid
 #' @export
-icd9ComorbiditiesQuanElixhauser <- function(icd9df,
-                                            visitId = "visitId",
-                                            icd9Field = "icd9",
-                                            isShort,
-                                            validateMapping = FALSE,
-                                            abbrevNames = TRUE,
-                                            applyHierarchy = TRUE) {
-  cbd <- icd9Comorbidities(icd9df = icd9df, visitId = visitId, icd9Field = icd9Field,
-                           isShort = isShort, icd9Mapping = quanElixhauserComorbid)
+icd9ComorbidQuanElix <- function(icd9df,
+                                      visitId = "visitId",
+                                      icd9Field = "icd9",
+                                      isShort,
+                                      validateMapping = FALSE,
+                                      abbrevNames = TRUE,
+                                      applyHierarchy = TRUE) {
+  cbd <- icd9Comorbid(icd9df = icd9df, visitId = visitId,
+                           icd9Field = icd9Field, isShort = isShort,
+                           icd9Mapping = icd9::quanElixComorbid)
   if (applyHierarchy) {
 
     # Use >0 rather than logical - apparently faster, and future proof against
@@ -251,40 +265,54 @@ icd9ComorbiditiesQuanElixhauser <- function(icd9df,
     cbd[["HTN"]] <- cbd[["HTN"]] + cbd[["HTNcx"]] > 0
     cbd[["HTNcx"]] <- NULL
 
-    # if we didn't apply the hierarchy, we have to use the naming scheme with HTN separated out:
+    # if we didn't apply the hierarchy, we have to use the naming scheme with
+    # HTN separated out:
 
     # assume that the comorbidities are the last 31 fields. At present, the
-    # icd9Comorbidities function doesn't attempt to aggregate fields it doesn't
+    # icd9Comorbid function doesn't attempt to aggregate fields it doesn't
     # know about, e.g. POA, or anything else the user provides in the data
     # frame, so these are just dropped, leaving the fields for visitId and all
     # the comorbidities:
 
-    if (abbrevNames) { names(cbd)[-1] <- quanElixhauserComorbidNamesAbbrev } else { names(cbd)[-1] <- quanElixhauserComorbidNames}
+    if (abbrevNames)
+      names(cbd)[-1] <- icd9::quanElixComorbidNamesAbbrev
+    else
+      names(cbd)[-1] <- icd9::quanElixComorbidNames
   } else {
-    if (abbrevNames) { names(cbd)[-1] <- quanElixhauserComorbidNamesHtnAbbrev } else { names(cbd)[-1] <- quanElixhauserComorbidNamesHtn}
+    if (abbrevNames)
+      names(cbd)[-1] <- icd9::quanElixComorbidNamesHtnAbbrev
+    else
+      names(cbd)[-1] <- icd9::quanElixComorbidNamesHtn
   }
   cbd
 }
 
-#' @rdname icd9Comorbidities
+#' @rdname icd9Comorbid
 #' @export
-icd9ComorbiditiesElixhauser <- function(icd9df,
-                                        visitId = "visitId",
-                                        icd9Field = "icd9",
-                                        isShort,
-                                        validateMapping = FALSE,
-                                        abbrevNames = TRUE,
-                                        applyHierarchy = TRUE) {
-  cbd <- icd9Comorbidities(icd9df = icd9df, visitId = visitId, icd9Field = icd9Field,
-                           isShort = isShort, icd9Mapping = elixhauserComorbid)
+icd9ComorbidElix <- function(icd9df,
+                                  visitId = "visitId",
+                                  icd9Field = "icd9",
+                                  isShort,
+                                  validateMapping = FALSE,
+                                  abbrevNames = TRUE,
+                                  applyHierarchy = TRUE) {
+  cbd <- icd9Comorbid(icd9df = icd9df, visitId = visitId,
+                           icd9Field = icd9Field, isShort = isShort,
+                           icd9Mapping = icd9::elixComorbid)
   if (applyHierarchy) {
     cbd[cbd[["Mets"]] > 0, "Tumor"] <- FALSE
     cbd[cbd[["DMcx"]] > 0, "DM"] <- FALSE
     cbd[["HTN"]] <- cbd[["HTN"]] + cbd[["HTNcx"]] > 0
     cbd[["HTNcx"]] <- NULL
-    if (abbrevNames) { names(cbd)[-1] <- elixhauserComorbidNamesAbbrev } else { names(cbd)[-1] <- elixhauserComorbidNames}
+    if (abbrevNames)
+      names(cbd)[-1] <- icd9::elixComorbidNamesAbbrev
+    else
+      names(cbd)[-1] <- icd9::elixComorbidNames
   } else {
-    if (abbrevNames) { names(cbd)[-1] <- elixhauserComorbidNamesHtnAbbrev } else { names(cbd)[-1] <- elixhauserComorbidNamesHtn}
+    if (abbrevNames)
+      names(cbd)[-1] <- icd9::elixComorbidNamesHtnAbbrev
+    else
+      names(cbd)[-1] <- icd9::elixComorbidNamesHtn
   }
   cbd
 }
@@ -294,7 +322,7 @@ icd9ComorbiditiesElixhauser <- function(icd9df,
 #'   unspecified, or unknown. Therefore, two options are given: get all the
 #'   comorbidities where the POA flag was definitely -ve, coded as "N" or
 #'   definitely +ve and coded as "Y". Negating one set won't give the other set
-#'   unless all codes were either Y or N. #describeIn icd9Comorbidities
+#'   unless all codes were either Y or N. #describeIn icd9Comorbid
 #' @template icd9df
 #' @template poaField
 #' @template poa
@@ -308,21 +336,23 @@ icd9ComorbiditiesElixhauser <- function(icd9df,
 #'   poa = c("Y", "N", NA, "Y"),
 #'   stringsAsFactors = FALSE
 #' )
-#' myData %>% icd9FilterPoaNotNo() %>% icd9ComorbiditiesAhrq(isShort = TRUE)
+#' myData %>% icd9FilterPoaNotNo() %>% icd9ComorbidAhrq(isShort = TRUE)
 #' # can fill out named fields also:
 #' myData %>% icd9FilterPoaYes(poaField="poa") %>%
-#'   icd9ComorbiditiesAhrq(icd9Field = "icd9", visitId = "visitId")
-#' # can call the core icd9Comorbidities function with an arbitrary mapping
+#'   icd9ComorbidAhrq(icd9Field = "icd9", visitId = "visitId")
+#' # can call the core icd9Comorbid function with an arbitrary mapping
 #' myData %>%
 #' icd9FilterPoaYes() %>%
-#' icd9Comorbidities(icd9Field = "icd9", visitId = "visitId",
-#'   icd9Mapping = quanElixhauserComorbid,
+#' icd9Comorbid(icd9Field = "icd9", visitId = "visitId",
+#'   icd9Mapping = quanElixComorbid,
 #'  validateMapping = TRUE,
 #'  isShortMapping = TRUE)
 #' }
 #' @export
 icd9FilterPoa <- function(icd9df, poaField = "poa", poa = icd9PoaChoices) {
-  poa = match.arg(poa)
+  poa <- match.arg(poa)
+  stopifnot(is.data.frame(icd9df))
+  stopifnot(is.character(poaField), length(poaField) == 1)
   stopifnot(poaField %in% names(icd9df))
   if (poa == "yes") return(icd9FilterPoaYes(icd9df, poaField = poaField))
   if (poa == "no") return(icd9FilterPoaNo(icd9df, poaField = poaField))
@@ -334,28 +364,32 @@ icd9FilterPoa <- function(icd9df, poaField = "poa", poa = icd9PoaChoices) {
 #' @export
 icd9FilterPoaYes <- function(icd9df, poaField = "poa") {
   stopifnot(poaField %in% names(icd9df))
-  icd9df[!is.na(icd9df[[poaField]]) & icd9df[[poaField]] %in% c("Y", "y"), -which(names(icd9df) == poaField)]
+  icd9df[!is.na(icd9df[[poaField]]) & icd9df[[poaField]] %in% c("Y", "y"),
+         names(icd9df) != poaField]
 }
 
 #' @rdname icd9FilterPoa
 #' @export
 icd9FilterPoaNo <- function(icd9df, poaField = "poa") {
   stopifnot(poaField %in% names(icd9df))
-  icd9df[!is.na(icd9df[[poaField]]) & icd9df[[poaField]] %in% c("N", "n"), -which(names(icd9df) == poaField)]
+  icd9df[!is.na(icd9df[[poaField]]) & icd9df[[poaField]] %in% c("N", "n"),
+         names(icd9df) != poaField]
 }
 
 #' @rdname icd9FilterPoa
 #' @export
 icd9FilterPoaNotNo <- function(icd9df, poaField = "poa") {
   stopifnot(poaField %in% names(icd9df))
-  icd9df[is.na(icd9df[[poaField]]) | icd9df[[poaField]] %nin% c("N", "n"), -which(names(icd9df) == poaField)]
+  icd9df[is.na(icd9df[[poaField]]) | icd9df[[poaField]] %nin% c("N", "n"),
+         names(icd9df) != poaField]
 }
 
 #' @rdname icd9FilterPoa
 #' @export
 icd9FilterPoaNotYes <- function(icd9df, poaField = "poa") {
   stopifnot(poaField %in% names(icd9df))
-  icd9df[is.na(icd9df[[poaField]]) | icd9df[[poaField]] %nin% c("Y", "y"), -which(names(icd9df) == poaField)]
+  icd9df[is.na(icd9df[[poaField]]) | icd9df[[poaField]] %nin% c("Y", "y"),
+         names(icd9df) != poaField]
 }
 
 icd9CharlsonFromIcd <- function(icd9df) {
@@ -376,6 +410,7 @@ icd9CharlsonFromComorbidities <- function(comorbid) {
 #' @export
 #' @return vector of the counts, with one per row of the input data
 icd9CountComorbid <- function(comorbid) {
-  apply(X = comorbid[, -1] %>%
-          logicalToBinary, MARGIN = 1, FUN = sum)
+  apply(logicalToBinary(comorbid[, -1]),
+        MARGIN = 1,
+        FUN = sum)
 }
